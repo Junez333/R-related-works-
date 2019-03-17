@@ -1,0 +1,74 @@
+---
+title: "Data Mining Homework"
+author: "Jun"
+date: "October 28, 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##New Problem 
+```{r}
+library(MASS)
+library(ISLR)
+library(class)
+set.seed(1008)
+#a
+logistic.fit <- glm(default ~ income + balance, data = Default, family = binomial)
+summary(logistic.fit)
+#b
+
+```
+
+```{r}
+set.seed(1028)
+# 5-fold CV
+kfolds <- 5
+folds <- rep_len(1:kfolds, 1000)
+folds <- sample(folds, 1000)
+
+qda.test.error.fold <- rep(0, kfolds)
+
+for(k in 1:kfolds)
+	fold <- which(folds == k)
+		
+	train <- Default[-fold, ]
+	Default.test <- Default[fold, ]
+logit.prob <- predict(logistic.fit, Default.test, type = "response")
+logit.pred <- rep("No", dim(Default.test)[1])
+logit.pred[logit.prob > 0.5] = "Yes"
+logit.table <- table(logit.pred, Default.test)
+logit.test.error <- (logit.table[1,2] + logit.table[2,1])/sum(logit.table)
+logit.test.error
+```
+
+## Excercise 5.4 problem 6
+##a
+```{r }
+library(ISLR)
+attach(Default)
+set.seed(1)
+fit.model<-glm(default~income+balance,data=Default,family="binomial")
+summary(fit.model)
+```
+##The standard error for intercept is 0.4348 income is 0.000004985, and for balance is 0.000274.
+
+##b
+
+```{r , echo=FALSE}
+boot.fn <- function(data, index) {
+    fit.b <- glm(default ~ income + balance, data = data, family = "binomial", subset = index)
+    return (coef(fit.b))}
+boot.fn
+```
+
+##c
+```{r, echo=FALSE}
+library(boot)
+boot(Default,boot.fn,1000)
+```
+##The standard error for beta0=0.4413733, beta1=0.00000488, beta2=0.00023020
+
+##d 
+##the estimated standard error using glm() and bootstrap functions are very similar with only slight difference for the intercept in the second decimal place. 
