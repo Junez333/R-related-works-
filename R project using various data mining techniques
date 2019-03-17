@@ -1,0 +1,297 @@
+#Libraries
+library(ISLR)
+library(tree)
+library(randomForest)
+library(ROCR)
+library(gbm)
+library(glmnet)
+library(caret)
+library(e1071)
+library(MASS)
+#constants to set the ratio of false negative to false postitive.
+cost_fp=1
+cost_fn=10
+#Functions used for computing error rates
+test.error <- function(pred,test)
+{ error.table<-table(pred, test)
+er<-(error.table[1,2] + error.table[2,1])/sum(error.table)
+}
+fp<-function(pred,test){
+error.table<-table(pred, test)
+(error.table[2,1]/sum(error.table[,1]))
+}
+fn<-function(pred,test){
+error.table<-table(pred, test)
+(error.table[1,2]/sum(error.table[,2]))
+}
+#Function used to compute optimal cut off by ROC curve, cost_fn can be changed
+cut.off<-function(pred,test){
+pred1 <- prediction( pred,test )
+cost.perf = performance(pred1, "cost", cost.fp = cost_fp, cost.fn = cost_fn)
+cut.off<-pred1@cutoffs[[1]][which.min(cost.perf@y.values[[1]])]
+return(cut.off)
+}
+#Data preparation
+#remove subjects with age less than 20 years old
+data.nhanes<-data.nhanes[data.nhanes$Age>19,]
+#remove NA's for response variable diabetes
+data.nhanes<-data.nhanes[!is.na(data.nhanes$Diabetes),]
+summary(data.nhanes)
+#drop variables
+drops<-c("AgeDecade", "AgeMonths", "Race3", "Length", "HeadCirc", "BMICatUnder20yrs",
+"Testosterone", "UrineVol2", "UrineFlow2", "PhysActiveDays", "ID",
+"DiabetesAge","nPregnancies","nBabies","Age1stBaby", "TVHrsDay",
+"CompHrsDay", "TVHrsDayChild", "CompHrsDayChild", "SmokeNow", "Smoke100n",
+"SmokeAge", "AgeFirstMarij", "RegularMarij", "AgeRegMarij", "PregnantNow")
+data.nhanes<-data.nhanes[ , !(names(data.nhanes) %in% drops)]
+#Imputation
+imputed_Data <- mice(data.nhanes, m=5, maxit = 50, seed = 500)
+summary(imputed_Data)
+complete.nhanes1<-complete(imputed_Data,1)
+write.csv(complete.nhanes1,"complete-11-20.csv")
+#Load Data and set-up
+nhanes <- read.csv("C:/Users/rpj7822/Desktop/Data Mining/Project/complete-11-20.csv")
+#Training and Test Data
+set.seed (1)
+train <- sample(1: nrow(nhanes), nrow(nhanes)/2)
+nh.train <- nhanes[train,]
+nh.test <- nhanes[- train,]
+db.test <- nhanes$Diabetes[-train]
+Shrinkage Methods
+#Ridge Regression
+set.seed(1)
+x <- model.matrix(Diabetes ~., data = nhanes)[,-1] # to take out the (Intercept)
+y <- nhanes$Diabetes
+#Using Cross Validation to pick the best tuning parameter
+cv.out <- cv.glmnet(x[train, ], y[train], family = "binomial", alpha = 0, nfolds = 10)
+best.lambda <- cv.out$lambda.min
+ridge.fit <- glmnet(x[train, ], y[train], alpha = 0, lambda = best.lambda, family = "binomial")
+ridge.prob <- predict(ridge.fit, s = best.lambda, newx = x[-train, ], family = "binomial", type = "response")
+cut.off <- function(cost_fp, cost_fn){
+pred <- prediction(ridge.prob, y[-train])
+cost.perf <- performance(pred, "cost", cost.fp = cost_fp, cost.fn = cost_fn)
+cut.off <- pred@cutoffs[[1]][which.min(cost.perf@y.values[[1]])]
+roc.perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+plot(roc.perf)
+abline(v=cut.off)
+return(cut.off)
+}
+cut.off1 <- cut.off(1, 1)
+cut.off2 <- cut.off(1, 2)
+cut.off10 <- cut.off(1, 10)
+## Calculate test error rate and false negative
+error_fn <- function(cut.off){
+ridge.pred <- rep("No", dim(nh.test)[1])
+ridge.pred[ridge.prob > cut.off] = "Yes"
+ridge.tab <- table(ridge.pred, db.test)
+ridge.test <- (ridge.tab[1,2]+ridge.tab[2,1])/sum(ridge.tab)
+ridge.fn <- ridge.tab[1,2]/sum(ridge.tab[,2])
+return(list(ridge.test, ridge.fn))
+}
+error_fn(cut.off1)
+error_fn(cut.off2)
+error_fn(cut.off10)
+r_fn <- error_fn(cut.off10)[2]
+## Finally, refit our ridge regression model on the full data set
+ridge.final <- glmnet(x, y, alpha = 0, lambda = best.lambda, family = "binomial")
+coef(ridge.final)
+#Lasso
+set.seed(1)
+x <- model.matrix(Diabetes ~., data = nhanes)[,-1] # to take out the (Intercept)
+12
+Stat 5850 Fall 2018
+y <- nhanes$Diabetes
+## Using Cross Validation to pick the best tuning parameter
+cv.out <- cv.glmnet(x[train, ], y[train], family = "binomial", alpha = 1, nfolds = 10)
+best.lambda <- cv.out$lambda.min
+lasso.fit <- glmnet(x[train, ], y[train], alpha = 1, lambda = best.lambda, family = "binomial")
+lasso.prob <- predict(lasso.fit, s = best.lambda, newx = x[-train, ], family = "binomial", type = "response")
+cut.off <- function(cost_fp, cost_fn){
+pred = prediction(lasso.prob, y[-train])
+cost.perf = performance(pred, "cost", cost.fp = cost_fp, cost.fn = cost_fn)
+cut.off = pred@cutoffs[[1]][which.min(cost.perf@y.values[[1]])]
+roc.perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+plot(roc.perf)
+abline(v=cut.off)
+return(cut.off)
+}
+cut.off1 <- cut.off(1, 1)
+cut.off2 <- cut.off(1, 2)
+cut.off10 <- cut.off(1, 10)
+## Calculate test error rate and false negative
+error_fn <- function(cut.off){
+lasso.pred <- rep("No", dim(nh.test)[1])
+lasso.pred[lasso.prob > cut.off] = "Yes"
+lasso.tab <- table(lasso.pred, db.test)
+lasso.test <- (lasso.tab[1,2]+lasso.tab[2,1])/sum(lasso.tab)
+lasso.fn <- lasso.tab[1,2]/sum(lasso.tab[,2])
+return(list(lasso.test, lasso.fn))
+}
+error_fn(cut.off1)
+error_fn(cut.off2)
+error_fn(cut.off10)
+l_fn <- error_fn(cut.off10)[2]
+## Finally, refit our ridge regression model on the full data set
+lasso.final <- glmnet(x, y, alpha = 1, lambda = best.lambda, family = "binomial")
+coef(lasso.final)
+plot(coef(lasso.final))
+#Elastic Net
+set.seed(1)
+Ecv.out <- cv.glmnet(x[train, ], y[train], alpha = 0.5, nfolds = 10, family = "binomial")
+best.lambda <- Ecv.out$lambda.min
+elasticnet.fit <- glmnet(x[train, ], y[train], alpha = 0.5, lambda = best.lambda, family = "binomial")
+elasticnet.pred <- predict(elasticnet.fit, s = best.Elambda, newx = x[-train, ], type = "response", family="binomial")
+cut.off <- function(cost_fp, cost_fn){
+pred = prediction( elasticnet.pred, y[-train] )
+cost.perf = performance(pred, "cost", cost.fp = cost_fp, cost.fn = cost_fn)
+cut.off = pred@cutoffs[[1]][which.min(cost.perf@y.values[[1]])]
+# roc.perf <- performance(elas.pred, measure = "tpr", x.measure = "fpr")
+# plot(roc.perf)
+# abline(v=cut.off)
+return(cut.off)
+}
+cut.off1 <- cut.off(1, 1)
+cut.off2 <- cut.off(1, 2)
+cut.off10 <- cut.off(1, 10)
+cut.off10
+## Calculate test error rate and false negative
+error_fn <- function(cut.off){
+elastic.pred <- rep("No", dim(nh.test)[1])
+elastic.pred[elasticnet.pred > cut.off] = "Yes"
+elastic.tab <- table(elastic.pred, db.test)
+elastic.test <- (elastic.tab[1,2]+elastic.tab[2,1])/sum(elastic.tab)
+elastic.fn <- elastic.tab[1,2]/sum(elastic.tab[,2])
+return(list(elastic.test, elastic.fn))
+}
+error_fn(cut.off1)
+error_fn(cut.off2)
+error_fn(cut.off10)
+e_fn <- error_fn(cut.off10)[2]
+e_fn
+## Finally, refit our elastic net model on the full data set
+elasticnet.final <- glmnet(x, y, alpha = 0.5, lambda = best.lambda, family = "binomial")
+coef(elasticnet.final)
+plot(coef(elasticnet.final))
+#LDA
+#LDA with limited variables from elastic net
+14
+Stat 5850 Fall 2018
+lda.fit.nhanes <- lda(Diabetes ~ Gender+Age+Race1+Education+MaritalStatus+HHIncome+HomeOwn+Weight+BMI+BMI_WHO+Pulse+BPDia1+BPSys3+
++DirectChol+TotChol+HealthGen+DaysPhysHlthBad+SleepTrouble+AlcoholYear+Smoke100+SexNumPartYear+SameSex,
+data = nhanes, subset = train)
+lda.fit.nhanes
+# Confusion matrix
+lda.pred.nhanes <- predict(lda.fit.nhanes, nh.test)
+lda.class <- lda.pred.nhanes$class
+lda.nh.table <- table(lda.class, db.test)
+lda.test.error <- (lda.nh.table[1,2] + lda.nh.table[2,1])/sum(lda.nh.table)
+lda.test.error
+lda.fn <- lda.nh.table[1,2]/sum(lda.nh.table[,2])
+lda.fn
+#QDA
+qda.fit <- qda(Diabetes ~ Gender+Age+Race1+Education+MaritalStatus+HHIncome+HomeOwn+Weight+BMI+BMI_WHO+Pulse+BPDia1+BPSys3+
++DirectChol+TotChol+HealthGen+DaysPhysHlthBad+SleepTrouble+AlcoholYear+Smoke100+SexNumPartYear+SameSex,
+data = nhanes, subset = train)
+qda.pred <- predict(qda.fit,nh.test)
+qda.class <- qda.pred$class
+qda.table <- table(qda.class, db.test)
+qda.test.error <- (qda.table[1,2] + qda.table[2,1])/sum(qda.table)
+qda.test.error
+qda.fn <- qda.table[1,2]/sum(qda.table[,2])
+qda.fn
+#Logistic Regression
+y<-nhanes$Diabetes
+logit.fit<-glm(Diabetes~Gender+Age+Race1+Education+MaritalStatus+HHIncome+HomeOwn+Weight+BMI+
+BMI_WHO+Pulse+BPDia1+BPSys3+DirectChol+TotChol+HealthGen+DaysPhysHlthBad+
+DaysMentHlthBad+SleepTrouble+AlcoholYear+Smoke100+
+SexNumPartYear+SameSex, data=nhanes[train,], family="binomial")
+logit.pred<-predict(logit.fit, newdata=nhanes[-train,], type="response")
+logit.pred.diabetes <- rep("negative", length(logit.pred))
+logit.pred.diabetes[logit.pred > cut.off(logit.pred,y[-train])] = "positive"
+logit.test.error<-test.error(logit.pred.diabetes,y[-train])
+logit.fn<-fn(logit.pred.diabetes,y[-train])
+#refit logistic regression with significant variables
+logit.final<-glm(Diabetes~Gender+Age+Race1+Education+DirectChol+TotChol+BPSys3+BMI+HealthGen+
+Smoke100+Pulse+BPDia1, data=nhanes, family = "binomial")
+summary(logit.final)
+CARTs
+#run the functions for error rates and constants and cut-off begore running this code
+#Trees
+tree.nhanes <- tree(Diabetes ~., subset = train, data = nhanes)
+summary(tree.nhanes)
+plot(tree.nhanes, col = "dark red")
+text(tree.nhanes, pretty = 1)
+# Predictions on the test set
+Diabetes.pred <- predict(tree.nhanes, newdata = nhanes[-train, ], type = "class")
+table(Diabetes.pred, Diabetes.test)
+tree.error<-test.error(Diabetes.pred, Diabetes.test)
+tree.fp<-fp(Diabetes.pred, Diabetes.test)
+tree.fn<-fn(Diabetes.pred, Diabetes.test)
+#Pruning the classification tree
+cv.nhanes <- cv.tree(tree.nhanes, FUN = prune.misclass)
+cv.nhanes
+which.min(cv.nhanes$dev)
+cv.nhanes$size[4]
+prune.nhanes <- prune.misclass(tree.nhanes, best = 5)
+plot(prune.nhanes, col = "dark red")
+text(prune.nhanes, pretty = 1)
+# Use Pruned Tree to make predictions on the test set
+Diabetes.pred <- predict(prune.nhanes, newdata = nhanes[-train, ], type = "class")
+table(Diabetes.pred, Diabetes.test)
+prune.error<-test.error(Diabetes.pred, Diabetes.test)
+prune.fp<-fp(Diabetes.pred, Diabetes.test)
+prune.fn<-fn(Diabetes.pred, Diabetes.test)
+#Bagging
+## mtry = 50, considering all the predictors which random forest becomes bagging
+bag.nhanes <- randomForest(Diabetes ~., subset = train, data = nhanes, mtry = 49, ntree = 100)
+# Predictions on the test set
+Diabetes.pred.bag <- predict(bag.nhanes, newdata = nhanes[-train,], type = "Class")
+# variable importance plot
+#importance(bag.nhanes)
+randomForest::importance(bag.nhanes)
+varImpPlot(bag.nhanes, n.var= 20, main = "Bagging Importance Plot")
+table(Diabetes.pred.bag, Diabetes.test)
+bag.error<-test.error(Diabetes.pred.bag, Diabetes.test)
+bag.fp<-fp(Diabetes.pred.bag, Diabetes.test)
+bag.fn<-fn(Diabetes.pred.bag, Diabetes.test)
+#Random Forest
+# By default, m = \sqrt{p} = \sqrt(50)
+rf.nhanes <- randomForest(Diabetes ~., subset = train, data = nhanes, mtry = 7)
+# Predictions on the test data set
+Diabetes.pred.rf <- predict(rf.nhanes, newdata = nhanes[-train,], type = "Class")
+# variable importance plot
+importance(rf.nhanes)
+varImpPlot(rf.nhanes ,n.var= 20, main = "Random Forest Importance Plot")
+rf.nhanes
+table(Diabetes.pred.rf, Diabetes.test)
+rf.error<-test.error(Diabetes.pred.rf, Diabetes.test)
+rf.fp<-fp(Diabetes.pred.rf, Diabetes.test)
+rf.fn<-fn(Diabetes.pred.rf, Diabetes.test)
+#Boosting
+## Boosting: distribution = "bernoulli"
+# classification tree, distribution = "bernoulli"
+boost.nhanes <- gbm((unclass(Diabetes)-1) ~., data = nhanes[train, ], distribution = "bernoulli", n.trees = 5000, interaction.depth = 2, shrinkage = 0.001)
+summary(boost.nhanes,cBars = 20,order = TRUE, las = 2)
+# Predictions on the test data set
+Diabetes.pred.boost <- predict(boost.nhanes, newdata = nhanes[-train,], n.trees = 5000, type ="response")
+C<-cut.off(Diabetes.pred.boost, Diabetes.test)
+Diabetes.pred.boost <- ifelse(Diabetes.pred.boost<C,"No","Yes")
+summary(Diabetes.pred.boost)
+table(Diabetes.pred.boost, Diabetes.test)
+boost.error<-test.error(Diabetes.pred.boost, Diabetes.test)
+boost.fn<-fn(Diabetes.pred.boost, Diabetes.test)
+boost.fp<-fp(Diabetes.pred.boost, Diabetes.test)
+#Adaboost
+## Boosting classification tree, distribution = "adaboost"
+adaboost.nhanes <- gbm((unclass(Diabetes)-1) ~., data = nhanes[train, ], distribution = "adaboost", n.trees = 5000, interaction.depth = 2, shrinkage = 0.001)
+summary(adaboost.nhanes,cBars = 20,order = TRUE, las = 2)
+# Predictions on the test data set
+Diabetes.pred.adaboost <- predict(adaboost.nhanes, newdata = nhanes[-train,], n.trees = 5000, type ="response")
+C<-cut.off(Diabetes.pred.adaboost, Diabetes.test)
+Diabetes.pred.adaboost <- ifelse(Diabetes.pred.adaboost<C,"No","Yes")
+summary(Diabetes.pred.adaboost)
+table(Diabetes.pred.adaboost, Diabetes.test)
+adaboost.error<-test.error(Diabetes.pred.adaboost, Diabetes.test)
+adaboost.fn<-fn(Diabetes.pred.adaboost, Diabetes.test)
+adaboost.fp<-fp(Diabetes.pred.adaboost, Diabetes.test)
+#plot(Diabetes.pred.adaboost)
